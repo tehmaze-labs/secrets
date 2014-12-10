@@ -1,0 +1,13 @@
+#!/bin/bash
+
+path=$(dirname $0)
+
+openssl genrsa -out $path/secrets.key 2048
+openssl req -new -x509 -days 365 -key $path/secrets.key -out $path/secrets.crt \
+    -subj "/CN=$(hostname -f)/"
+cat $path/secrets.{key,crt} > $path/secrets.pem
+
+go run $path/../keyutil/keyutil.go generate \
+    | tee $path/secrets.box
+go run $path/../keyutil/keyutil.go publickey $path/secrets.box \
+    | tee $path/secrets.box.pub

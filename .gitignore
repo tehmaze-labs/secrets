@@ -22,3 +22,7 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# Test data and generated binaries
+secrets
+testdata/secrets.*
