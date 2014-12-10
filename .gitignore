@@ -25,4 +25,3 @@ _testmain.go
 
 # Test data and generated binaries
 secrets
-testdata/secrets.*

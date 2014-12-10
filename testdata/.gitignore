@@ -1,0 +1,6 @@
+*
+# Skip gitignore itself
+!.gitignore
+# Skip the init script and the example configuration
+!init
+!*.conf
