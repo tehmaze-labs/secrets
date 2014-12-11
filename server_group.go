@@ -22,6 +22,7 @@ func getGroup(cfg *Config) router.HandlerFunc {
 		n := req.Params.Get("name")
 		k := fmt.Sprintf("group.%s", n)
 		if cfg.Storage.Keys.Has(k) {
+			log.Printf("group %s: list keys (%s)", n, req.RemoteAddr)
 			err = cfg.Storage.Keys.Get(k, &v)
 		} else {
 			log.Printf("no group %q\n", n)

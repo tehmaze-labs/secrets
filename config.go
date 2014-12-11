@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,15 +24,35 @@ func errCfgSyntax(msg string, a ...interface{}) error {
 
 // Group is the configuration for a named group.
 type Group struct {
+	Name string
 	ACLs []string
 	Keys map[string][]byte
+	Data *storage.Storage
 }
 
-func NewGroup() (group *Group) {
-	group = new(Group)
-	group.ACLs = []string{}
-	group.Keys = map[string][]byte{}
-	return group
+func (g *Group) String() string {
+	return g.Name
+}
+
+// NewGroup initialises a new secrets group and its storage backend.
+func NewGroup(name string, cfg *Config) (group *Group, err error) {
+	if cfg.Storage.Path == "" {
+		return nil, errors.New(`configure Server.Storage`)
+	}
+	opt := storage.NewOptions(filepath.Join(cfg.Storage.Path, "group", name))
+	if cfg.Storage.Compress {
+		opt.Extra["compress"] = cfg.Storage.Level
+	}
+	backend, err := storage.NewJSONBackend(opt)
+	if err != nil {
+		return nil, err
+	}
+	return &Group{
+		Name: name,
+		ACLs: []string{},
+		Keys: map[string][]byte{},
+		Data: storage.New(backend),
+	}, nil
 }
 
 // configBlock holds a block of configuration options.
@@ -42,8 +63,10 @@ type configBlock interface {
 // Config is the top-level configuration structure.
 type Config struct {
 	Storage struct {
-		Data *storage.Storage
-		Keys *storage.Storage
+		Path     string
+		Compress bool
+		Level    int
+		Keys     *storage.Storage
 	}
 	Server struct {
 		tls.Certificate
@@ -51,7 +74,7 @@ type Config struct {
 		Key  *key.Key
 		Root *x509.CertPool
 	}
-	ACL   map[string]*ACL
+	ACL   ACLs // map[string]*ACL
 	Group map[string]*Group
 }
 
@@ -61,7 +84,6 @@ func NewConfig() *Config {
 	cfg.ACL = map[string]*ACL{}
 	cfg.Group = map[string]*Group{}
 	cfg.Server.Root = x509.NewCertPool()
-	cfg.Storage.Data = &storage.Storage{}
 	cfg.Storage.Keys = &storage.Storage{}
 	return cfg
 }
@@ -123,7 +145,7 @@ func (cfg *Config) Validate() error {
 			return fmt.Errorf("group %q has no ACL", name)
 		}
 	}
-	if cfg.Storage.Data.Backend == nil {
+	if cfg.Storage.Keys.Backend == nil {
 		return errors.New("no Server.Storage configured")
 	}
 	return nil
@@ -175,9 +197,8 @@ type configACL struct {
 }
 
 func newConfigACL(cfg *Config, name string) *configACL {
-	acl := new(ACL)
-	acl.Permits = []string{}
-	acl.Rejects = []string{}
+	empty := []string{}
+	acl, _ := NewACL(empty, empty, empty, empty)
 	return &configACL{
 		Config: cfg,
 		Name:   name,
@@ -190,17 +211,34 @@ func (block *configACL) parse(field []string) (b configBlock, err error) {
 		block.Config.ACL[block.Name] = block.ACL
 		return nil, nil
 	}
-	if len(field) < 2 {
-		return nil, errCfgSyntax(`expected key value`)
+	if len(field) != 3 {
+		return nil, errCfgSyntax(`expected key type value`)
+	}
+	if field[1] != "cidr" && field[1] != "host" {
+		return nil, errCfgSyntax(`invalid type %q`, field[1])
 	}
 	switch field[0] {
 	case "Permit":
-		for _, pattern := range field[1:] {
-			block.ACL.Permits = append(block.ACL.Permits, pattern)
+		switch field[1] {
+		case "cidr":
+			_, ipnet, err := net.ParseCIDR(field[2])
+			if err != nil {
+				return nil, err
+			}
+			block.ACL.PermitCIDR(ipnet)
+		case "host":
+			block.ACL.PermitHost(field[2])
 		}
 	case "Reject":
-		for _, pattern := range field[1:] {
-			block.ACL.Rejects = append(block.ACL.Rejects, pattern)
+		switch field[1] {
+		case "cidr":
+			_, ipnet, err := net.ParseCIDR(field[2])
+			if err != nil {
+				return nil, err
+			}
+			block.ACL.RejectCIDR(ipnet)
+		case "host":
+			block.ACL.RejectHost(field[2])
 		}
 	default:
 		return nil, errCfgSyntax(`unexpected ACL token %q`, field[0])
@@ -226,7 +264,10 @@ func newConfigGroup(cfg *Config, name string) *configGroup {
 
 func (block *configGroup) parse(field []string) (b configBlock, err error) {
 	if len(field) == 1 && field[0] == "}" {
-		block.Config.Group[block.Name] = NewGroup()
+		block.Config.Group[block.Name], err = NewGroup(block.Name, block.Config)
+		if err != nil {
+			return nil, err
+		}
 		block.Config.Group[block.Name].ACLs = block.ACLs
 		if block.Include != nil {
 			hostname, err := os.Hostname()
@@ -256,10 +297,7 @@ func (block *configGroup) parse(field []string) (b configBlock, err error) {
 }
 
 type configServer struct {
-	Config   *Config
-	Storage  string
-	Level    int
-	Compress bool
+	Config *Config
 }
 
 func newConfigServer(cfg *Config) *configServer {
@@ -270,36 +308,18 @@ func newConfigServer(cfg *Config) *configServer {
 
 func (block *configServer) parse(field []string) (b configBlock, err error) {
 	if len(field) == 1 && field[0] == "}" {
-		if block.Storage == "" {
+		if block.Config.Storage.Path == "" {
 			return nil, errCfgSyntax(`expected Storage option`)
 		}
-		var storages = map[string]*storage.Storage{
-			"data": block.Config.Storage.Data,
-			"keys": block.Config.Storage.Keys,
+		opt := storage.NewOptions(filepath.Join(block.Config.Storage.Path, "keys"))
+		if block.Config.Storage.Compress {
+			opt.Extra["compress"] = block.Config.Storage.Level
 		}
-		for name, stor := range storages {
-			opt := storage.NewOptions(filepath.Join(block.Storage, name))
-			if block.Compress {
-				opt.Extra["compress"] = block.Level
-			}
-			backend, err := storage.NewJSONBackend(opt)
-			if err != nil {
-				return nil, err
-			}
-			newstor := storage.New(backend)
-			*stor = *newstor
+		backend, err := storage.NewJSONBackend(opt)
+		if err != nil {
+			return nil, err
 		}
-
-		/*
-			var back storage.Backend
-			// Data storage
-			back, err = storage.NewJSONBackend(storage.NewOptions(filepath.Join(block.Storage, "data")))
-			if err != nil {
-				return nil, err
-			}
-			block.Config.Storage.Data = storage.New(back)
-			// Groups storage
-		*/
+		block.Config.Storage.Keys = storage.New(backend)
 		return nil, nil
 	}
 	if len(field) < 2 {
@@ -322,8 +342,8 @@ func (block *configServer) parse(field []string) (b configBlock, err error) {
 		if level < gzip.DefaultCompression || level > gzip.BestCompression {
 			return nil, fmt.Errorf("gzip: invalid compression level: %d", level)
 		}
-		block.Compress = true
-		block.Level = level
+		block.Config.Storage.Compress = true
+		block.Config.Storage.Level = level
 	case "KeyPair":
 		if len(field) != 3 {
 			return nil, errCfgSyntax(`expected keyFile certFile`)
@@ -356,7 +376,7 @@ func (block *configServer) parse(field []string) (b configBlock, err error) {
 		if len(field) != 2 {
 			return nil, errCfgSyntax(`expected path`)
 		}
-		block.Storage = field[1]
+		block.Config.Storage.Path = field[1]
 	default:
 		return nil, errCfgSyntax(`unexpected Server token %q`, field[0])
 	}

@@ -2,7 +2,6 @@ package router
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -156,7 +155,6 @@ func toMatcher(pattern string) (*regexp.Regexp, []string) {
 	}
 
 	var express = `^` + strings.Join(paths, "") + `$`
-	log.Printf("router: %s -> %s\n", pattern, express)
 	var matcher = regexp.MustCompile(express)
 	return matcher, param
 }

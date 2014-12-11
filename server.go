@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -72,10 +73,11 @@ type Server struct {
 func ListenAndServeTLS(cfg *Config) error {
 	rt := router.NewRouter()
 	rt.GET("/", getIndex)
-	rt.GET("/data/:key/", getData(cfg))
-	rt.PUT("/data/:key/", putData(cfg))
 	rt.GET("/group/", getGroups(cfg))
 	rt.GET("/group/:name/", getGroup(cfg))
+	rt.GET("/group/:name/data/", getGroupDatas(cfg))
+	rt.GET("/group/:name/data/:key/", getGroupData(cfg))
+	rt.PUT("/group/:name/data/:key/", putGroupData(cfg))
 	rt.GET("/node/", getNodes(cfg))
 	sv := &Server{
 		Config: cfg,
@@ -112,12 +114,22 @@ func (srv *Server) ListenAndServeTLS() error {
 		ClientCAs:    srv.Config.Server.Root,
 	}
 
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if host == "" {
+		host, err = os.Hostname()
+		if err != nil {
+			return err
+		}
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("server: listening on https://%s\n", addr)
+	log.Printf("server: listening on https://%s:%s/\n", host, port)
 	tlsListener := tls.NewListener(tcpKeepAliveListener{ln.(*net.TCPListener)}, config)
 	return srv.Serve(tlsListener)
 }
