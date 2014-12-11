@@ -10,7 +10,8 @@ try:
     import requestsx
     __import__('pyasn1')  # not using module itself
 except ImportError:
-    sys.stderr.write('Please install all dependancies (pip install -r requirements.txt):\n')
+    sys.stderr.write(
+        'Please install all dependancies (pip install -r requirements.txt):\n')
     raise
 
 from requests.adapters import HTTPAdapter
@@ -30,10 +31,10 @@ class SaneTLS(HTTPAdapter):
 
     def init_poolmanager(self, connections, maxsize, block=False):
         self.poolmanager = PoolManager(
-                num_pools=connections,
-                maxsize=maxsize,
-                block=block,
-                ssl_version=ssl.PROTOCOL_TLSv1,
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            ssl_version=ssl.PROTOCOL_TLSv1,
         )
 
 
@@ -62,9 +63,9 @@ class Client(object):
     '''
 
     OIDPrivateKey = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.2')
-    OIDPublicKey  = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.1')
+    OIDPublicKey = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.1')
     PEMPrivateKey = "SECRETS PRIVATE KEY"
-    PEMPublicKey  = "SECRETS PUBLIC KEY"
+    PEMPublicKey = "SECRETS PUBLIC KEY"
 
     def __init__(self, keyfile, baseurl, verify=None):
         self.keyfile = keyfile
@@ -73,7 +74,9 @@ class Client(object):
         self.key = Client.loadKeyFile(self.PEMPrivateKey, self.keyfile)
 
         if self.key.getComponentByName('id') != self.OIDPrivateKey:
-            raise TypeError('Key file {0} does not contain a SECRETS private key'.format(keyfile))
+            raise TypeError(
+                'Key file {0} does not contain a SECRETS private key'.format(
+                    keyfile))
 
         self.publicKey = self.key.getComponentByName('publicKey').asOctets()
         self.publicKeyBase64 = binascii.b2a_base64(self.publicKey).rstrip()
@@ -100,7 +103,8 @@ class Client(object):
             if keep:
                 if line == footer:
                     if not parsed:
-                        raise ValueError('Could not decode {0} PEM block'.format(type))
+                        raise ValueError(
+                            'Could not decode {0} PEM block'.format(type))
                     return ''.join(parsed).decode('base64')
                 else:
                     parsed.append(line)
@@ -175,7 +179,8 @@ class Client(object):
                 print name
 
         else:
-            for key in self._get_json('/group/{0}/data/'.format(group)).get('keys', {}):
+            url = '/group/{0}/data/'.format(group)
+            for key in self._get_json(url).get('keys', {}):
                 print key
 
     def command_put(self, group, name, filename=None):
@@ -199,11 +204,14 @@ def run():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--cafile', default='../testdata/secrets.pem',
+    parser.add_argument(
+        '-c', '--cafile', default='../testdata/secrets.pem',
         help='CA certificates file')
-    parser.add_argument('-k', '--keyfile', default='testdata/client.box',
+    parser.add_argument(
+        '-k', '--keyfile', default='testdata/client.box',
         help='box key file')
-    parser.add_argument('-u', '--url', default='https://localhost:6443/',
+    parser.add_argument(
+        '-u', '--url', default='https://localhost:6443/',
         help='server URL')
     parser.add_argument('command', nargs=1)
     parser.add_argument('args', nargs='*')
