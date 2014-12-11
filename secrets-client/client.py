@@ -193,7 +193,6 @@ class Client(object):
         else:
             data = open(filename, 'rb').read()
 
-        print recipients.values()
         pubs = map(binascii.a2b_base64, recipients.values())
         secret = self.encrypt_to(data, pubs)
         self._put_json('/group/{0}/data/{1}/'.format(group, name), secret)
@@ -209,9 +208,9 @@ def run():
         help='CA certificates file')
     parser.add_argument(
         '-k', '--keyfile', default='testdata/client.box',
-        help='box key file')
+        help='private key file')
     parser.add_argument(
-        '-u', '--url', default='https://localhost:6443/',
+        '-u', '--url', default='https://localhost:6443',
         help='server URL')
     parser.add_argument('command', nargs=1)
     parser.add_argument('args', nargs='*')
