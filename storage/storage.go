@@ -3,78 +3,35 @@ package storage
 import (
 	"errors"
 	"os"
-	"path"
 	"strings"
-	"sync"
+
+	"github.com/tehmaze-labs/secrets/storage/backend"
 )
-
-const (
-	// DefaultFileMode contains a secure default file mode
-	DefaultFileMode = os.FileMode(0600)
-	// DefaultPathMode contains a secure default path mode
-	DefaultPathMode = os.FileMode(0700)
-)
-
-// Backend interface defines methods for a storage back end
-type Backend interface {
-	Lock()
-	RLock()
-	RLocker() sync.Locker
-	RUnlock()
-	Unlock()
-
-	Prepare(key string) error
-	Marshal(v interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
-
-	Has(key string) bool
-	Get(key string) ([]byte, error)
-	Set(key string, data []byte) error
-	Delete(key string) error
-	Scan(prefix string) <-chan string
-}
 
 // Storage ...
 type Storage struct {
-	Backend Backend
+	Backend   backend.Backend
+	Marshal   MarshalFunc
+	Unmarshal UnmarshalFunc
 }
 
-// Options ...
-type Options struct {
-	Path          string
-	TranslatePath TranslatePathFunc
-	TranslateFile TranslateFileFunc
-	FileMode      os.FileMode
-	PathMode      os.FileMode
-	Extra         map[string]interface{}
-}
+/*
+Marshal(v interface{}) ([]byte, error)
+Unmarshal(data []byte, v interface{}) error
+*/
 
-// NewOptions creates a new Options structure for the given path, with defaults.
-func NewOptions(dir string) Options {
-	return Options{
-		Path:     path.Clean(dir),
-		FileMode: DefaultFileMode,
-		PathMode: DefaultPathMode,
-		Extra:    map[string]interface{}{},
-	}
-}
+// MarshalFunc converts an interface to bytes that can be stored.
+type MarshalFunc func(v interface{}) ([]byte, error)
 
-// TranslatePathFunc translates a key to a directory that contains the key file.
-type TranslatePathFunc func(key string) []string
-
-// TranslateFileFunc translates a key to a file path to the key file without its path.
-type TranslateFileFunc func(key string) string
-
-// translatePathSimple uses a single directory for all keys
-func translatePathSimple(key string) []string { return []string{} }
-
-// translateFileSimple uses the key as file name
-func translateFileSimple(key string) string { return key }
+// UnmarshalFunc coverts stored bytes to an interface.
+type UnmarshalFunc func(data []byte, v interface{}) error
 
 // New initializes a new Storage backend.
-func New(b Backend) *Storage {
+func New(b backend.Backend, m MarshalFunc, u UnmarshalFunc) *Storage {
 	s := &Storage{
-		Backend: b,
+		Backend:   b,
+		Marshal:   m,
+		Unmarshal: u,
 	}
 	return s
 }
@@ -92,7 +49,7 @@ func (s *Storage) Get(key string, v interface{}) (err error) {
 	if err != nil {
 		return err
 	}
-	if err = s.Backend.Unmarshal(data, v); err != nil {
+	if err = s.Unmarshal(data, v); err != nil {
 		return err
 	}
 	return nil
@@ -105,7 +62,7 @@ func (s *Storage) Set(key string, v interface{}) (err error) {
 	if err = s.Backend.Prepare(key); err != nil {
 		return errors.New("prepare failed: " + err.Error())
 	}
-	data, err := s.Backend.Marshal(v)
+	data, err := s.Marshal(v)
 	if err != nil {
 		return errors.New("marshal failed: " + err.Error())
 	}

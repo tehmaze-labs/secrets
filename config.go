@@ -16,6 +16,7 @@ import (
 
 	"github.com/tehmaze-labs/secrets/key"
 	"github.com/tehmaze-labs/secrets/storage"
+	"github.com/tehmaze-labs/secrets/storage/backend"
 )
 
 func errCfgSyntax(msg string, a ...interface{}) error {
@@ -39,11 +40,11 @@ func NewGroup(name string, cfg *Config) (group *Group, err error) {
 	if cfg.Storage.Path == "" {
 		return nil, errors.New(`configure Server.Storage`)
 	}
-	opt := storage.NewOptions(filepath.Join(cfg.Storage.Path, "group", name))
+	opt := backend.NewOptions(filepath.Join(cfg.Storage.Path, "group", name))
 	if cfg.Storage.Compress {
 		opt.Extra["compress"] = cfg.Storage.Level
 	}
-	backend, err := storage.NewJSONBackend(opt)
+	backend, err := backend.NewFileBackend(opt)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func NewGroup(name string, cfg *Config) (group *Group, err error) {
 		Name: name,
 		ACLs: []string{},
 		Keys: map[string][]byte{},
-		Data: storage.New(backend),
+		Data: storage.NewJSON(backend),
 	}, nil
 }
 
@@ -311,15 +312,15 @@ func (block *configServer) parse(field []string) (b configBlock, err error) {
 		if block.Config.Storage.Path == "" {
 			return nil, errCfgSyntax(`expected Storage option`)
 		}
-		opt := storage.NewOptions(filepath.Join(block.Config.Storage.Path, "keys"))
+		opt := backend.NewOptions(filepath.Join(block.Config.Storage.Path, "keys"))
 		if block.Config.Storage.Compress {
 			opt.Extra["compress"] = block.Config.Storage.Level
 		}
-		backend, err := storage.NewJSONBackend(opt)
+		backend, err := backend.NewFileBackend(opt)
 		if err != nil {
 			return nil, err
 		}
-		block.Config.Storage.Keys = storage.New(backend)
+		block.Config.Storage.Keys = storage.NewJSON(backend)
 		return nil, nil
 	}
 	if len(field) < 2 {
