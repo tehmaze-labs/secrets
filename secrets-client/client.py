@@ -6,43 +6,25 @@ import os
 import ssl
 import sys
 try:
-    import requests
-    from requests.adapters import HTTPAdapter
-    from requests.packages.urllib3.poolmanager import PoolManager
     import libnacl
-    from pyasn1.type import univ, namedtype, tag
-    from pyasn1.codec.der import decoder as der_decoder
+    import requestsx
+    __import__('pyasn1')  # not using module itself
 except ImportError:
-    sys.stderr.write('Please install the missing dependancies (pip install)\n')
+    sys.stderr.write('Please install all dependancies (pip install -r requirements.txt):\n')
     raise
 
-import argparse
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.poolmanager import PoolManager
+from pyasn1.type import univ, namedtype, tag
+from pyasn1.codec.der import decoder as der_decoder
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-c', '--cafile', default='../testdata/secrets.pem',
-    help='CA certificates file')
-parser.add_argument('-k', '--keyfile', default='testdata/client.box',
-    help='box key file')
-parser.add_argument('-u', '--url', default='https://localhost:6443/',
-    help='server URL')
-parser.add_argument('command', nargs=1)
-parser.add_argument('args', nargs='*')
-
-def usage():
-    print('usage: %s [<options>] <command\n', sys.argv[0])
-    print('''
-commands:
-
-    secrets-client ls [<group>]
-    secrets-client cat <group> <key>
-    secrets-client put <group> <key> [<file>]
-
-options:
-''')
-    parser.usage()
-    return 1
 
 class SaneTLS(HTTPAdapter):
+    '''
+    By default, requests doesn't set sane defaults for TLS. We'll at least make
+    sure that Python is using TLSv1. Your Python stack may or may not include
+    support for the TLSv1 protocol.
+    '''
     def __init__(self, ca_certs):
         super(SaneTLS, self).__init__()
 
@@ -58,8 +40,15 @@ class SaneTLS(HTTPAdapter):
 # Our sane requests handler
 sane = requests.Session()
 
+# Python's json encoder doesn't understand bytes (which should default to a
+# base64 encoded string).
+json_bytes = lambda b: binascii.b2a_base64(b).rstrip().decode('utf-8')
+
 
 class Key(univ.Sequence):
+    '''
+    ASN.1 sequence for a serialized key.
+    '''
     componentType = namedtype.NamedTypes(
         namedtype.NamedType('id', univ.ObjectIdentifier()),
         namedtype.NamedType('publicKey', univ.OctetString()),
@@ -68,6 +57,10 @@ class Key(univ.Sequence):
 
 
 class Client(object):
+    '''
+    Secrets client.
+    '''
+
     OIDPrivateKey = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.2')
     OIDPublicKey  = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.1')
     PEMPrivateKey = "SECRETS PRIVATE KEY"
@@ -116,6 +109,9 @@ class Client(object):
         raise ValueError('Could not find {0} PEM block'.format(type))
 
     def decrypt(self, s):
+        '''
+        Decrypt a secrets structure ``s`` with our private key.
+        '''
         key = None
         nonce = binascii.a2b_base64(s['nonce'])
         sender = binascii.a2b_base64(s['sender'])
@@ -129,6 +125,25 @@ class Client(object):
         box = binascii.a2b_base64(s['secret'])
         return libnacl.crypto_secretbox_open(box, nonce, key)
 
+    def encrypt_to(self, message, recipients):
+        '''
+        Encrypt a secrets message to ``recipients`` using our private key.
+        '''
+        nonce = os.urandom(24)
+        key = os.urandom(32)
+        secret = dict(
+            sender=json_bytes(self.publicKey),
+            nonce=json_bytes(nonce),
+            secret=json_bytes(libnacl.crypto_secretbox(message, nonce, key)),
+            keys={},
+        )
+
+        print recipients
+        for pub in recipients:
+            box = libnacl.crypto_box(key, nonce, pub, self.privateKey)
+            secret['keys'][json_bytes(pub)] = json_bytes(box)
+
+        return secret
 
     def _get_json(self, url):
         result = sane.get(
@@ -145,10 +160,16 @@ class Client(object):
         )
 
     def command_cat(self, group, filename):
+        '''
+        Command line ``cat`` command.
+        '''
         data = self._get_json('/group/{0}/data/{1}/'.format(group, filename))
         print self.decrypt(data)
 
     def command_ls(self, group=None):
+        '''
+        Command line ``ls`` command.
+        '''
         if group is None:
             for name in self._get_json('/group/'):
                 print name
@@ -158,6 +179,9 @@ class Client(object):
                 print key
 
     def command_put(self, group, name, filename=None):
+        '''
+        Command line ``put`` command.
+        '''
         recipients = self._get_json('/group/{0}/'.format(group))
 
         if filename is None:
@@ -165,26 +189,24 @@ class Client(object):
         else:
             data = open(filename, 'rb').read()
 
-        _bytes = lambda b: binascii.b2a_base64(b).rstrip().decode('utf-8')
-
-        nonce = os.urandom(24)
-        key = os.urandom(32)
-        secret = dict(
-            sender=_bytes(self.publicKey),
-            nonce=_bytes(nonce),
-            secret=_bytes(libnacl.crypto_secretbox(data, nonce, key)),
-            keys={},
-        )
-
-        for recipient in recipients.values():
-            pub = binascii.a2b_base64(recipient)
-            box = libnacl.crypto_box(key, nonce, pub, self.privateKey)
-            secret['keys'][_bytes(pub)] = _bytes(box)
-
+        print recipients.values()
+        pubs = map(binascii.a2b_base64, recipients.values())
+        secret = self.encrypt_to(data, pubs)
         self._put_json('/group/{0}/data/{1}/'.format(group, name), secret)
 
 
 def run():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--cafile', default='../testdata/secrets.pem',
+        help='CA certificates file')
+    parser.add_argument('-k', '--keyfile', default='testdata/client.box',
+        help='box key file')
+    parser.add_argument('-u', '--url', default='https://localhost:6443/',
+        help='server URL')
+    parser.add_argument('command', nargs=1)
+    parser.add_argument('args', nargs='*')
     args = parser.parse_args()
 
     # Set TLS options
