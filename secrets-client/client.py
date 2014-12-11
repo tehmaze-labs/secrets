@@ -7,7 +7,7 @@ import ssl
 import sys
 try:
     import libnacl
-    import requestsx
+    import requests
     __import__('pyasn1')  # not using module itself
 except ImportError:
     sys.stderr.write(
@@ -16,20 +16,24 @@ except ImportError:
 
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.poolmanager import PoolManager
-from pyasn1.type import univ, namedtype, tag
+from pyasn1.type import univ, namedtype
 from pyasn1.codec.der import decoder as der_decoder
 
 
 class SaneTLS(HTTPAdapter):
-    '''
-    By default, requests doesn't set sane defaults for TLS. We'll at least make
-    sure that Python is using TLSv1. Your Python stack may or may not include
-    support for the TLSv1 protocol.
-    '''
+
+    """By default, requests doesn't set sane defaults for TLS.
+
+    We'll at least make sure that Python is using TLSv1. Your Python stack may
+    or may not include support for the TLSv1 protocol.
+    """
+
     def __init__(self, ca_certs):
+        """Construct a new SantTLS instance."""
         super(SaneTLS, self).__init__()
 
     def init_poolmanager(self, connections, maxsize, block=False):
+        """Initialize a new PoolManager instance to satisfy urllib3."""
         self.poolmanager = PoolManager(
             num_pools=connections,
             maxsize=maxsize,
@@ -47,9 +51,9 @@ json_bytes = lambda b: binascii.b2a_base64(b).rstrip().decode('utf-8')
 
 
 class Key(univ.Sequence):
-    '''
-    ASN.1 sequence for a serialized key.
-    '''
+
+    """ASN.1 sequence for a serialized key."""
+
     componentType = namedtype.NamedTypes(
         namedtype.NamedType('id', univ.ObjectIdentifier()),
         namedtype.NamedType('publicKey', univ.OctetString()),
@@ -58,9 +62,8 @@ class Key(univ.Sequence):
 
 
 class Client(object):
-    '''
-    Secrets client.
-    '''
+
+    """Secrets client."""
 
     OIDPrivateKey = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.2')
     OIDPublicKey = univ.ObjectIdentifier('1.3.6.1.4.1.27266.11.17.1')
@@ -68,6 +71,10 @@ class Client(object):
     PEMPublicKey = "SECRETS PUBLIC KEY"
 
     def __init__(self, keyfile, baseurl, verify=None):
+        """Initialize a new secrets client.
+
+        Supplied are a efault private key and base URL.
+        """
         self.keyfile = keyfile
         self.baseurl = baseurl
         self.verify = verify
@@ -87,6 +94,7 @@ class Client(object):
 
     @classmethod
     def loadKeyFile(cls, type, keyFile):
+        """Load a typed key from disk."""
         with open(keyFile, "r") as fd:
             keyData = fd.read()
             derData = Client.parsePEM(type, keyData)
@@ -94,6 +102,7 @@ class Client(object):
 
     @classmethod
     def parsePEM(cls, type, data):
+        """Parse a PEM block and return the base64 decoded substrate."""
         header = '-----BEGIN {0}-----'.format(type)
         footer = '-----END {0}-----'.format(type)
         parsed = []
@@ -113,9 +122,7 @@ class Client(object):
         raise ValueError('Could not find {0} PEM block'.format(type))
 
     def decrypt(self, s):
-        '''
-        Decrypt a secrets structure ``s`` with our private key.
-        '''
+        """Decrypt a secrets structure ``s`` with our private key."""
         key = None
         nonce = binascii.a2b_base64(s['nonce'])
         sender = binascii.a2b_base64(s['sender'])
@@ -130,9 +137,7 @@ class Client(object):
         return libnacl.crypto_secretbox_open(box, nonce, key)
 
     def encrypt_to(self, message, recipients):
-        '''
-        Encrypt a secrets message to ``recipients`` using our private key.
-        '''
+        """Encrypt a secret message to ``recipients`` using our private key."""
         nonce = os.urandom(24)
         key = os.urandom(32)
         secret = dict(
@@ -164,16 +169,12 @@ class Client(object):
         )
 
     def command_cat(self, group, filename):
-        '''
-        Command line ``cat`` command.
-        '''
+        """Command line ``cat`` command."""
         data = self._get_json('/group/{0}/data/{1}/'.format(group, filename))
         print self.decrypt(data)
 
     def command_ls(self, group=None):
-        '''
-        Command line ``ls`` command.
-        '''
+        """Command line ``ls`` command."""
         if group is None:
             for name in self._get_json('/group/'):
                 print name
@@ -184,9 +185,7 @@ class Client(object):
                 print key
 
     def command_put(self, group, name, filename=None):
-        '''
-        Command line ``put`` command.
-        '''
+        """Command line ``put`` command."""
         recipients = self._get_json('/group/{0}/'.format(group))
 
         if filename is None:
@@ -201,6 +200,7 @@ class Client(object):
 
 
 def run():
+    """Command line handler."""
     import argparse
 
     parser = argparse.ArgumentParser()
