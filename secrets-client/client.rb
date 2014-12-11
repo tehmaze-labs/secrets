@@ -4,9 +4,9 @@ require 'net/http'
 require 'optparse'
 require 'openssl'
 require 'ostruct'
-require 'rbnacl'
 require 'securerandom'
 require 'uri'
+require 'rbnacl'
 
 class Client
     @@OIDPrivate = "1.3.6.1.4.1.27266.11.17.2"
