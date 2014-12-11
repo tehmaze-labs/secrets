@@ -39,3 +39,21 @@ you can also include the public key of your backup box(en) in the group.
 The secrets server does not take care of automagically re-encrypting secrets if
 a node joins a group, because under normal circumstances the secret server has
 no access to the decrypted data.
+
+## Message packets
+
+Encrypted secrets will have to following format:
+
+    {
+        "sender": "<32 byte public key>",
+        "nonce":  "<24 byte nonce>",
+        "secret": "<secret box>",
+        "keys": {
+            "<32 byte public key>": "<box>",
+            ...
+        }
+    }
+
+All of the data in this message is BASE64 encoded. The box format is a sealed
+NaCL box encrypted from sender's private key to receiver's public key. The
+secret box format is a sealed NaCL box encrypted with the key stored in box.
